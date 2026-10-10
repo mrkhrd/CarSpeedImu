@@ -7,6 +7,7 @@ import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.Gravity
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -21,11 +22,13 @@ class MainActivity : Activity() {
     private lateinit var imu: ImuSource
     private val rows = mutableListOf<Pair<Channel, Row>>()
     private lateinit var statusView: TextView
+    private var carSetup = ""
 
     private class Row(val value: TextView, val rate: TextView, val info: TextView)
 
     private val refresh = object : Runnable {
         override fun run() {
+            car?.let { statusView.text = "$carSetup\nCar service: ${it.status}" }
             for ((ch, row) in rows) {
                 row.value.text = ch.value
                 row.rate.text = ch.rate.summary()
@@ -38,12 +41,12 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         imu = ImuSource(this)
-        if (isCar) car = CarSpeedSource(this)
+        if (isCar) car = createCarSource()
         setContentView(buildUi())
 
         if (car != null) {
             if (checkSelfPermission(PERMISSION_SPEED) == PackageManager.PERMISSION_GRANTED) {
-                car?.start()
+                startCar()
             } else {
                 requestPermissions(arrayOf(PERMISSION_SPEED), REQ_SPEED)
             }
@@ -54,9 +57,9 @@ class MainActivity : Activity() {
         super.onRequestPermissionsResult(requestCode, permissions, results)
         if (requestCode != REQ_SPEED) return
         if (results.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
-            car?.start()
+            startCar()
         } else {
-            statusView.text = "Speed permission denied — vehicle speed unavailable."
+            carSetup += "\nSpeed permission denied — vehicle speed unavailable."
         }
     }
 
@@ -77,6 +80,33 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 
+    /** Loads the car library (possibly from the system at runtime); never throws. */
+    private fun createCarSource(): CarSpeedSource? {
+        val lib = CarLib.find(this)
+        Log.i(TAG, "car library: ${lib.source}\n${lib.log}")
+        if (lib.loader == null) {
+            carSetup = "Android Automotive, but car library not found:\n${lib.log.trim()}"
+            return null
+        }
+        return try {
+            CarSpeedSource(this, lib.loader).also { carSetup = "Car library: ${lib.source}, API ${it.apiFlavour}" }
+        } catch (t: Throwable) {
+            Log.e(TAG, "car library unusable", t)
+            carSetup = "Car library at ${lib.source} unusable: ${CarSpeedSource.describe(t)}\n${lib.log.trim()}"
+            null
+        }
+    }
+
+    private fun startCar() {
+        try {
+            car?.start()
+        } catch (t: Throwable) {
+            Log.e(TAG, "Car.createCar failed", t)
+            carSetup += "\nCar.createCar failed: ${CarSpeedSource.describe(t)}"
+            car = null
+        }
+    }
+
     // ---- UI (built in code: a vertical list of channel cards) ----
 
     private fun buildUi(): ScrollView {
@@ -87,7 +117,7 @@ class MainActivity : Activity() {
         }
 
         statusView = text(16f, Color.LTGRAY).apply {
-            text = if (isCar) "Android Automotive detected" else "Not a car — vehicle speed disabled, IMU only"
+            text = if (isCar) carSetup else "Not a car — vehicle speed disabled, IMU only"
         }
         root.addView(statusView)
 
@@ -139,6 +169,7 @@ class MainActivity : Activity() {
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     companion object {
+        private const val TAG = "CarSpeedImu"
         private const val PERMISSION_SPEED = "android.car.permission.CAR_SPEED"
         private const val REQ_SPEED = 1
         private const val UI_REFRESH_MS = 100L

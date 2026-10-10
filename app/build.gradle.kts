@@ -7,8 +7,7 @@ android {
     namespace = "com.example.carspeedimu"
     compileSdk = 34
 
-    // Car API (android.car.*) from the SDK's optional libraries; provided by the head unit at runtime.
-    useLibrary("android.car")
+    // No compile-time dependency on android.car: it is loaded at runtime (see CarLib.kt).
 
     defaultConfig {
         applicationId = "com.example.carspeedimu"
@@ -32,4 +31,11 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+}
+
+dependencies {
+    testImplementation("junit:junit:4.13.2")
 }
